@@ -1,206 +1,184 @@
 #include "pb2json.h"
 
-//using std::string;
-std::string hex_encode(const std::string& input)
-{
-	static const char* const lut = "0123456789abcdef";
-	size_t len = input.length();
+int _parse_msg(const google::protobuf::Message *msg, Json::Value &root);
+void _parse_repeated_field(const google::protobuf::Message *msg, const google::protobuf::Reflection * ref,
+	const google::protobuf::FieldDescriptor *field, Json::Value &arr);
 
-	std::string output;
-	output.reserve(2 * len);
-	for (size_t i = 0; i < len; ++i)
-	{
-		const unsigned char c = input[i];
-		output.push_back(lut[c >> 4]);
-		output.push_back(lut[c & 15]);
-	}
-	return output;
-}
-char * pb2json(const google::protobuf::Message &msg)
+int pb2json(const google::protobuf::Message &msg, Json::Value &root)
 {
 	GOOGLE_PROTOBUF_VERIFY_VERSION;
-	json_t *root = parse_msg(&msg);
-	char *json = json_dumps(root,0);
-	json_decref(root);
-	return json; // should be freed by caller
+	return _parse_msg(&msg, root);
 }
-char * pb2json( google::protobuf::Message *msg,const char *buf ,int len)
+
+void _parse_repeated_field(const google::protobuf::Message *msg, const google::protobuf::Reflection * ref,
+	const google::protobuf::FieldDescriptor *field, Json::Value &arr)
 {
-	GOOGLE_PROTOBUF_VERIFY_VERSION;
-	std::string s (buf,len);
-	msg->ParseFromString(s);
-	json_t *root = parse_msg(msg);
-	char *json = json_dumps(root,0);
-	json_decref(root);
-	return json; // should be freed by caller
-}
-json_t *parse_repeated_field(const google::protobuf::Message *msg,const google::protobuf::Reflection * ref,const google::protobuf::FieldDescriptor *field)
-{
-	size_t count = ref->FieldSize(*msg,field);
-	json_t *arr = json_array();	
-	if(!arr)return NULL;
+	size_t count = ref->FieldSize(*msg, field);
 	switch(field->cpp_type())	
 	{
 		case google::protobuf::FieldDescriptor::CPPTYPE_DOUBLE:
 			for(size_t i = 0 ; i != count ; ++i)
 			{
-				double	value1 = ref->GetRepeatedDouble(*msg,field,i);
-				json_array_append_new(arr,json_real(value1));	
+				double value1 = ref->GetRepeatedDouble(*msg,field,i);
+				arr.append(value1);
 			}
 			break;
 		case google::protobuf::FieldDescriptor::CPPTYPE_FLOAT:
 			for(size_t i = 0 ; i != count ; ++i)
 			{
 				float value2 = ref->GetRepeatedFloat(*msg,field,i);
-				json_array_append_new(arr,json_real(value2));	
+				arr.append(value2);
 			}
 			break;
 		case google::protobuf::FieldDescriptor::CPPTYPE_INT64:
 			for(size_t i = 0 ; i != count ; ++i)
 			{
 				int64_t value3 = ref->GetRepeatedInt64(*msg,field,i);
-				json_array_append_new(arr,json_integer(value3))	;
+				arr.append((int)value3); // jsoncpp is too old, no Int64 exist
 			}
 			break;
 		case google::protobuf::FieldDescriptor::CPPTYPE_UINT64:
 			for(size_t i = 0 ; i != count ; ++i)
 			{
 				uint64_t value4 = ref->GetRepeatedUInt64(*msg,field,i);
-				json_array_append_new(arr,json_integer(value4));	
+				arr.append((unsigned int)value4); // jsoncpp is too old, no UInt64 exist
 			}
 			break;
 		case google::protobuf::FieldDescriptor::CPPTYPE_INT32:
 			for(size_t i = 0 ; i != count ; ++i)
 			{
 				int32_t value5 = ref->GetRepeatedInt32(*msg,field,i);
-				json_array_append_new(arr,json_integer(value5));	
+				arr.append(value5);
 			}
 			break;
 		case google::protobuf::FieldDescriptor::CPPTYPE_UINT32:
 			for(size_t i = 0 ; i != count ; ++i)
 			{
 				uint32_t value6 = ref->GetRepeatedUInt32(*msg,field,i);
-				json_array_append_new(arr,json_integer(value6));	
+				arr.append(value6);
 			}
 			break;
 		case google::protobuf::FieldDescriptor::CPPTYPE_BOOL:
 			for(size_t i = 0 ; i != count ; ++i)
 			{
 				bool value7 = ref->GetRepeatedBool(*msg,field,i);
-				json_array_append_new(arr,value7?json_true():json_false())	;
+				arr.append(value7);
 			}
 			break;
 		case google::protobuf::FieldDescriptor::CPPTYPE_STRING:
 			for(size_t i = 0 ; i != count ; ++i)
 			{
 				std::string value8 = ref->GetRepeatedString(*msg,field,i);
-				json_array_append_new(arr,json_string(value8.c_str()));	
+				arr.append(value8);
 			}
 			break;
 		case google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE:
 			for(size_t i = 0 ; i != count ; ++i)
 			{
 				const google::protobuf::Message *value9 = &(ref->GetRepeatedMessage(*msg,field,i));
-				json_array_append_new(arr,parse_msg(value9));
+				Json::Value obj;
+				_parse_msg(value9, obj);
+				arr.append(obj);
 			}
 			break;
 		case google::protobuf::FieldDescriptor::CPPTYPE_ENUM:
 			for(size_t i = 0 ; i != count ; ++i)
 			{
 				const google::protobuf::EnumValueDescriptor* value10 = ref->GetRepeatedEnum(*msg,field,i);
-				json_array_append_new(arr,json_integer(value10->number()));	
+				arr.append(value10->number());
 			}
 			break;
 		default:
 			break;
 	}
-	return arr;
+	return;
 }
-json_t *parse_msg(const google::protobuf::Message *msg)
+
+int _parse_msg(const google::protobuf::Message *msg, Json::Value &root)
 {
 	const google::protobuf::Descriptor *d = msg->GetDescriptor();
-	if(!d)return NULL;
+	if(!d)return -__LINE__;
+
 	size_t count = d->field_count();
-	json_t *root = json_object();
-	if(!root)return NULL;
 	for (size_t i = 0; i != count ; ++i)
 	{
 		const google::protobuf::FieldDescriptor *field = d->field(i);
-		if(!field)return NULL;
-
+		if(!field)return -__LINE__;
 		const google::protobuf::Reflection *ref = msg->GetReflection();
-		if(!ref)return NULL;
+		if(!ref)return -__LINE__;
+
 		const char *name = field->name().c_str();
-		if(field->is_repeated())
-			json_object_set_new(root,name,parse_repeated_field(msg,ref,field));
+		if (field->is_repeated())
+		{
+			Json::Value arr;
+			_parse_repeated_field(msg,ref,field,arr);
+            if (arr.size() > 0)
+			    root[name] = arr;
+		}
+
 		if(!field->is_repeated() && ref->HasField(*msg,field))
 		{
-
-			double value1;
-			float value2;
-			int64_t value3;
-			uint64_t value4;
-			int32_t value5;
-			uint32_t value6;
-			bool value7;
-			std::string value8;
-			const google::protobuf::Message *value9;
-			const google::protobuf::EnumValueDescriptor *value10;
-
 			switch (field->cpp_type())
 			{
-				case google::protobuf::FieldDescriptor::CPPTYPE_DOUBLE:
-					value1 = ref->GetDouble(*msg,field);
-					json_object_set_new(root,name,json_real(value1));	
+				case google::protobuf::FieldDescriptor::CPPTYPE_DOUBLE: {
+					double value1 = ref->GetDouble(*msg,field);
+					root[name] = value1;
 					break;
-				case google::protobuf::FieldDescriptor::CPPTYPE_FLOAT:
-					value2 = ref->GetFloat(*msg,field);
-					json_object_set_new(root,name,json_real(value2));	
+				}
+				case google::protobuf::FieldDescriptor::CPPTYPE_FLOAT: {
+					float value2 = ref->GetFloat(*msg,field);
+					root[name] = value2;
 					break;
-				case google::protobuf::FieldDescriptor::CPPTYPE_INT64:
-					value3 = ref->GetInt64(*msg,field);
-					json_object_set_new(root,name,json_integer(value3))	;
+				}
+				case google::protobuf::FieldDescriptor::CPPTYPE_INT64: {
+					int64_t value3 = ref->GetInt64(*msg,field);
+					root[name] = (int)value3;
 					break;
-				case google::protobuf::FieldDescriptor::CPPTYPE_UINT64:
-					value4 = ref->GetUInt64(*msg,field);
-					json_object_set_new(root,name,json_integer(value4));	
+				}
+				case google::protobuf::FieldDescriptor::CPPTYPE_UINT64: {
+					uint64_t value4 = ref->GetUInt64(*msg,field);
+					root[name] = (unsigned int)value4;
 					break;
-				case google::protobuf::FieldDescriptor::CPPTYPE_INT32:
-					value5 = ref->GetInt32(*msg,field);
-					json_object_set_new(root,name,json_integer(value5));	
+				}
+				case google::protobuf::FieldDescriptor::CPPTYPE_INT32: {
+					int32_t value5 = ref->GetInt32(*msg,field);
+					root[name] = value5;
 					break;
-				case google::protobuf::FieldDescriptor::CPPTYPE_UINT32:
-					value6 = ref->GetUInt32(*msg,field);
-					json_object_set_new(root,name,json_integer(value6));	
+				}
+				case google::protobuf::FieldDescriptor::CPPTYPE_UINT32: {
+					uint32_t value6 = ref->GetUInt32(*msg,field);
+					root[name] = value6;
 					break;
-				case google::protobuf::FieldDescriptor::CPPTYPE_BOOL:
-					value7 = ref->GetBool(*msg,field);
-					json_object_set_new(root,name,value7?json_true():json_false())	;
+				}
+				case google::protobuf::FieldDescriptor::CPPTYPE_BOOL: {
+					bool value7 = ref->GetBool(*msg,field);
+					root[name] = value7;
 					break;
-				case google::protobuf::FieldDescriptor::CPPTYPE_STRING:
-					if (field->type() == google::protobuf::FieldDescriptor::TYPE_BYTES) {
-						value8 = hex_encode(ref->GetString(*msg,field));
-					} else {
-						value8 = ref->GetString(*msg,field);
-					}
-					json_object_set_new(root,name,json_string(value8.c_str()));	
+				}
+				case google::protobuf::FieldDescriptor::CPPTYPE_STRING: {
+					std::string value8 = ref->GetString(*msg,field);
+					root[name] = value8;
 					break;
-				case google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE:
-					value9 = &(ref->GetMessage(*msg,field));
-					if (value9)
-						json_object_set_new(root,name,parse_msg(value9));
+				}
+				case google::protobuf::FieldDescriptor::CPPTYPE_MESSAGE: {
+					const google::protobuf::Message *value9 = &(ref->GetMessage(*msg,field));
+					if (value9) {
+                        Json::Value obj;
+						_parse_msg(value9, obj);
+                        root[name] = obj;
+                    }
 					break;
-				case google::protobuf::FieldDescriptor::CPPTYPE_ENUM:
-					value10 = ref->GetEnum(*msg,field);
-					json_object_set_new(root,name,json_integer(value10->number()));	
+				}
+				case google::protobuf::FieldDescriptor::CPPTYPE_ENUM: {
+					const google::protobuf::EnumValueDescriptor *value10 = ref->GetEnum(*msg,field);
+					root[name] = value10->number();
 					break;
+				}
 				default:
 					break;
 			}
-
 		}
-
 	}
-	return root;
-
+	return 0;
 }
+
